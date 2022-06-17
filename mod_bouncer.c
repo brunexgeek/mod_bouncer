@@ -18,7 +18,6 @@
 #define ENABLED_UNDEF  2
 
 #define get_server_config(r)  ap_get_module_config((r)->server->module_config, &bouncer_module)
-#define syslog_print(fmt,...) do { openlog("mod_bouncer", LOG_PID, LOG_DAEMON); syslog( LOG_DAEMON|LOG_ERR, fmt, __VA_ARGS__ ); closelog(); } while (0)
 
 typedef struct
 {
@@ -31,11 +30,13 @@ typedef struct
     tree_t *tree;
     FILE *log;
     apr_array_header_t *proxies;
+    const char *server;
     uint8_t enabled;
 } config_t;
 
 static void *create_server_conf(apr_pool_t *pool, server_rec *s);
 static const char *directive_set_enabled(cmd_parms *cmd, void *cfg, const char *arg);
+static const char *directive_set_pattern_file(cmd_parms *cmd, void *cfg, const char *arg);
 static const char *directive_add_pattern(cmd_parms *cmd, void *cfg, const char *arg);
 static const char *directive_set_log(cmd_parms *cmd, void *cfg, const char *arg);
 static const char *directive_set_proxies(cmd_parms *cmd, void *cfg, const char *arg);
@@ -45,6 +46,7 @@ static int bouncer_handler(request_rec *r);
 static const command_rec bouncer_directives[] =
 {
     AP_INIT_TAKE1("BouncerEngine", directive_set_enabled, NULL, RSRC_CONF, "Enable or disable mod_bouncer"),
+    AP_INIT_TAKE1("BouncerPatternFile", directive_set_pattern_file, NULL, RSRC_CONF, "Append one or more patterns"),
     AP_INIT_ITERATE("BouncerPattern", directive_add_pattern, NULL, RSRC_CONF, "Append one or more patterns"),
     AP_INIT_ITERATE("BouncerTrustedProxy", directive_set_proxies, NULL, RSRC_CONF, "List of trusted proxies"),
     AP_INIT_TAKE1("BouncerLog", directive_set_log, NULL, RSRC_CONF, "Set the location of the monitoring log"),
@@ -73,6 +75,7 @@ static void *create_server_conf(apr_pool_t *pool, server_rec *s)
         config->pool = pool;
         config->enabled = ENABLED_UNDEF;
         config->tree = tree_init();
+        config->server = s->server_hostname;
     }
     return config;
 }
@@ -87,14 +90,56 @@ static const char *directive_set_enabled(cmd_parms *cmd, void *cfg, const char *
     return NULL;
 }
 
+static char *add_pattern( config_t *config, apr_pool_t *pool, const char *pattern )
+{
+    if (pattern == NULL || *pattern == 0)
+        return "Pattern cannot be empty or NULL";
+    size_t len = strlen(pattern);
+    if (*pattern == '^') --len;
+    if (len < 3 || len > 255)
+        return "Pattern length must be 3 to 255 characters long";
+    if (!tree_append(config->tree, pattern))
+        return apr_psprintf(pool, "Unable to add patter '%s'", pattern);
+    return NULL;
+}
+
+static const char *directive_set_pattern_file(cmd_parms *cmd, void *cfg, const char *arg)
+{
+    (void) cfg;
+    config_t *config = (config_t*) get_server_config(cmd);
+    if (config == NULL || config->enabled != ENABLED_ON) return NULL;
+
+    char pattern[256];
+    apr_file_t *fp = NULL;
+    apr_file_open(&fp, arg, APR_FOPEN_READ, 0, cmd->pool);
+    if (fp)
+    {
+        while (apr_file_gets(pattern, sizeof(pattern)-1, fp) == APR_SUCCESS)
+        {
+            apr_collapse_spaces(pattern, pattern);
+            if (*pattern == 0) continue;
+            const char *result = add_pattern(config, cmd->pool, pattern);
+            if (result)
+            {
+                apr_file_close(fp);
+                return result;
+            }
+            //syslog_print(config->server, "Got pattern '%s'", pattern);
+        }
+        apr_file_close(fp);
+        return NULL;
+    }
+    else
+        return apr_psprintf(cmd->pool, "Unable to open '%s'", arg);
+}
+
 static const char *directive_add_pattern(cmd_parms *cmd, void *cfg, const char *arg)
 {
     (void) cfg;
 
     config_t *config = (config_t*) get_server_config(cmd);
     if (config == NULL || config->enabled != ENABLED_ON) return NULL;
-    tree_append(config->tree, arg);
-    return NULL;
+    return add_pattern(config, cmd->pool, arg);
 }
 
 static const char *directive_set_log(cmd_parms *cmd, void *cfg, const char *arg)
@@ -106,7 +151,7 @@ static const char *directive_set_log(cmd_parms *cmd, void *cfg, const char *arg)
         return NULL;
     config->log = log_open(arg);
     if (config->log == NULL)
-        syslog_print("Unable to open log %s: %s", arg, strerror(errno) );
+        return apr_psprintf(cmd->pool, "Unable to open log %s: %s", arg, strerror(errno) );
     return NULL;
 }
 
@@ -127,7 +172,7 @@ static int look_like_address( const char *value )
     }
     // IPv4
     while ((*p >= '0' && *p <= '9') || *p == '.' || *p == ' ') ++p;
-    //syslog_print("look_like_address %s %d %d", value, (int)len, (int)*p);
+    //syslog_print(config->server, "look_like_address %s %d %d", value, (int)len, (int)*p);
     return (*p == 0 && len >= 7 && len <= 15) ? 4 : 0;  // max IPv4 length is 15
 }
 
@@ -139,7 +184,7 @@ static const char *directive_set_proxies(cmd_parms *cmd, void *cfg, const char *
     if (config == NULL || config->enabled != ENABLED_ON)
         return NULL;
 
-    syslog_print("Adding trusted proxy %s", arg);
+    //syslog_print(config->server, "Adding trusted proxy %s", arg);
 
     char *addr = apr_pstrdup(cmd->temp_pool, arg);
     char *mask = ap_strchr(addr, '/');
@@ -167,6 +212,7 @@ static const char *directive_set_proxies(cmd_parms *cmd, void *cfg, const char *
 static void register_hooks(apr_pool_t *pool)
 {
     (void) pool;
+
     ap_hook_handler(bouncer_handler, NULL, NULL, APR_HOOK_FIRST);
 }
 
@@ -204,7 +250,7 @@ static apr_sockaddr_t *get_client_xff_address( request_rec *r )
         apr_collapse_spaces(entry, entry);
 
         int type = look_like_address(entry);
-        //syslog_print("Processing remote %s [IPv%d]", entry, type);
+        //syslog_print(config->server, "Processing remote %s [IPv%d]", entry, type);
         if (type == 0 ||
             apr_sockaddr_info_get(&addr, entry, (type == 4) ? APR_INET : APR_INET6, 0, 0, r->pool) != APR_SUCCESS)
         {

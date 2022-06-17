@@ -3,6 +3,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 typedef struct
 {
@@ -12,8 +13,7 @@ typedef struct
 } tree_t;
 
 tree_t *tree_init();
-int tree_merge( const tree_t *from, tree_t *to );
-int tree_append( tree_t *root, const char *expr );
-int tree_match( const tree_t *root, const char *value );
+bool tree_append( tree_t *root, const char *expr );
+bool tree_match( const tree_t *root, const char *value );
 
 #endif // TREE_H

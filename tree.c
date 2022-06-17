@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdbool.h>
 
 #define TREE_NODE_COUNT 84
 #define TREE_NODE_SIZE  (TREE_NODE_COUNT * sizeof(uint16_t))
@@ -51,9 +52,9 @@ tree_t *tree_init()
     return tree;
 }
 
-static int tree_append_expr( tree_t *root, const char *expr, size_t len )
+static bool tree_append_expr( tree_t *root, const char *expr, size_t len )
 {
-    if (root == NULL || expr == NULL) return 0;
+    if (root == NULL || expr == NULL) return false;
 
     //for (const char *c = expr; c < expr+len; ++c)
     //    putchar(*c);
@@ -67,11 +68,11 @@ static int tree_append_expr( tree_t *root, const char *expr, size_t len )
         --len;
     }
 
-    if (len == 0 || len > 0xFF) return 0;
+    if (len == 0 || len > 255) return false;
     const char *end = expr + len;
 
     for (const char *p = expr; p < end; ++p)
-        if (ascii_to_index(*p) < 0) return 0;
+        if (ascii_to_index(*p) < 0) return false;
 
     int off = 0;
     int id = -1;
@@ -93,33 +94,33 @@ static int tree_append_expr( tree_t *root, const char *expr, size_t len )
     root->slots[off+id] |= flags;
     if (len < root->min_expr)
         root->min_expr = (uint16_t) len;
-    return 1;
+    return true;
 }
 
-int tree_append( tree_t *root, const char *expr )
+bool tree_append( tree_t *root, const char *expr )
 {
     if (root == NULL || expr == NULL || *expr == 0)
-        return 0;
+        return false;
 
     const char *p;
     while ((p = strchr(expr, ' ')))
     {
         if (!tree_append_expr(root, expr, (size_t) (p - expr)))
-            return 0;
+            return false;
         expr = p + 1;
     }
-    if (*expr == 0) return 1;
+    if (*expr == 0) return true;
     return tree_append_expr(root, expr, strlen(expr));
 }
 
-int tree_match( const tree_t *root, const char *value )
+bool tree_match( const tree_t *root, const char *value )
 {
     if (root == NULL || value == NULL || *value == 0)
-        return 0;
+        return false;
 
     const char *tmp = value;
     int len = (int) strlen(value);
-    if (len > 0xFF) return 0;
+    if (len > 255) return false;
 
     while (len >= root->min_expr && *tmp)
     {
@@ -140,13 +141,5 @@ int tree_match( const tree_t *root, const char *value )
         ++tmp;
         --len;
     }
-    return 0;
-}
-
-int tree_merge( const tree_t *from, tree_t *to )
-{
-    (void) from;
-    (void) to;
-    // TODO: implement the tree merging
-    return 0;
+    return false;
 }
