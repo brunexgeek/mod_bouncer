@@ -1,0 +1,16 @@
+name: Test CI
+
+on: [push]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-20.04
+
+    steps:
+    - uses: actions/checkout@v1
+    - name: dependencies
+      run: sudo apt-get install make gcc apache2-dev
+    - name: build
+      run: chmod a+x ./build.sh && ./build.sh
+
