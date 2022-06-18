@@ -27,11 +27,11 @@ typedef struct
 typedef struct
 {
     apr_pool_t *pool;
-    tree_t *tree;
     apr_array_header_t *proxies;
-    const char *server;
     log_t *log;
-    uint8_t enabled;
+    tree_t *tree;
+    uint32_t enabled : 2;
+    uint32_t flags : 30;
 } config_t;
 
 static void *create_server_conf(apr_pool_t *pool, server_rec *s);
@@ -45,11 +45,11 @@ static int bouncer_handler(request_rec *r);
 
 static const command_rec bouncer_directives[] =
 {
-    AP_INIT_TAKE1("BouncerEngine", directive_set_enabled, NULL, RSRC_CONF, "Enable or disable mod_bouncer"),
-    AP_INIT_TAKE1("BouncerPatternFile", directive_set_pattern_file, NULL, RSRC_CONF, "Append one or more patterns"),
-    AP_INIT_ITERATE("BouncerPattern", directive_add_pattern, NULL, RSRC_CONF, "Append one or more patterns"),
-    AP_INIT_ITERATE("BouncerTrustedProxy", directive_set_proxies, NULL, RSRC_CONF, "List of trusted proxies"),
-    AP_INIT_TAKE1("BouncerLog", directive_set_log, NULL, RSRC_CONF, "Set the location of the monitoring log"),
+    AP_INIT_TAKE1("BouncerEngine", directive_set_enabled, NULL, RSRC_CONF, "Enable or disable the module"),
+    AP_INIT_TAKE1("BouncerPatternFile", directive_set_pattern_file, NULL, RSRC_CONF, "Append one or more patterns through external file"),
+    AP_INIT_RAW_ARGS("BouncerPattern", directive_add_pattern, NULL, RSRC_CONF, "Append one or more patterns"),
+    AP_INIT_ITERATE("BouncerTrustedProxy", directive_set_proxies, NULL, RSRC_CONF, "Append to the list of trusted proxies"),
+    AP_INIT_TAKE1("BouncerLog", directive_set_log, NULL, RSRC_CONF, "Set the location of the module log"),
     { NULL }
 };
 
@@ -68,14 +68,12 @@ module AP_MODULE_DECLARE_DATA bouncer_module =
 static void *create_server_conf(apr_pool_t *pool, server_rec *s)
 {
     (void) s;
-
     config_t *config = apr_pcalloc(pool, sizeof(config_t));
     if (config)
     {
         config->pool = pool;
         config->enabled = ENABLED_UNDEF;
-        config->tree = tree_init();
-        config->server = s->server_hostname;
+        config->tree = tree_create();
     }
     return config;
 }
@@ -86,7 +84,21 @@ static const char *directive_set_enabled(cmd_parms *cmd, void *cfg, const char *
 
     config_t *config = (config_t*) get_server_config(cmd);
     if (config == NULL) return NULL;
-    config->enabled = !strcasecmp(arg, "on") ? ENABLED_ON : ENABLED_OFF;
+    if (!strcasecmp(arg, "on"))
+        config->enabled = ENABLED_ON;
+    else
+    if (!strcasecmp(arg, "off"))
+    {
+        config->enabled = ENABLED_OFF;
+        if (config->proxies) apr_array_clear(config->proxies);
+        if (config->log) log_close(config->log);
+        if (config->tree) tree_destroy(config->tree);
+        config->proxies = NULL;
+        config->log = NULL;
+        config->tree = NULL;
+    }
+    else
+        return "Invalid argument. Possible values are 'on' and 'off'";
     return NULL;
 }
 
@@ -107,9 +119,10 @@ static const char *directive_set_pattern_file(cmd_parms *cmd, void *cfg, const c
 {
     (void) cfg;
     config_t *config = (config_t*) get_server_config(cmd);
-    if (config == NULL || config->enabled != ENABLED_ON) return NULL;
+    if (config == NULL || config->enabled != ENABLED_ON)
+        return NULL;
 
-    char pattern[256];
+    char pattern[1024];
     apr_file_t *fp = NULL;
     apr_file_open(&fp, arg, APR_FOPEN_READ, 0, cmd->pool);
     if (fp)
@@ -138,7 +151,9 @@ static const char *directive_add_pattern(cmd_parms *cmd, void *cfg, const char *
     (void) cfg;
 
     config_t *config = (config_t*) get_server_config(cmd);
-    if (config == NULL || config->enabled != ENABLED_ON) return NULL;
+    if (config == NULL || config->enabled != ENABLED_ON)
+        return NULL;
+    //log_print(config->log, LOG_TYPE_INFO, "BouncerPattern %s", arg);
     return add_pattern(config, cmd->pool, arg);
 }
 
@@ -147,8 +162,10 @@ static const char *directive_set_log(cmd_parms *cmd, void *cfg, const char *arg)
     (void) cfg;
 
     config_t *config = (config_t*) get_server_config(cmd);
-    if (config == NULL || config->enabled != ENABLED_ON || config->log != NULL)
+    if (config == NULL || config->enabled != ENABLED_ON)
         return NULL;
+    if (config->log != NULL)
+        return "Log path aready set";
     if ((config->log = log_open(arg, config->pool)) == NULL)
         return apr_psprintf(cmd->pool, "Unable to open log %s: %s", arg, strerror(errno) );
     return NULL;
@@ -208,16 +225,46 @@ static const char *directive_set_proxies(cmd_parms *cmd, void *cfg, const char *
     return NULL;
 }
 
+#if 0
+static int bouncer_post_config(apr_pool_t *pconf, apr_pool_t *plog,apr_pool_t *ptemp, server_rec *s)
+{
+    (void) pconf;
+    (void) plog;
+    (void) ptemp;
+    server_rec *server = s;
+    while (server != NULL)
+    {
+        config_t *config = (config_t*) ap_get_module_config(server->module_config, &bouncer_module);
+        if (config == NULL) return DECLINED;
+
+        if (config->tree)
+        {
+            uint32_t size;
+            tree_usage(config->tree, &size, NULL);
+            log_print(config->log, LOG_TYPE_INFO, "Configuration done. Memory usage is %0.2f KiB.",
+                (float) size / 1024.0F);
+        }
+
+        server = server->next;
+    }
+    return OK;
+}
+#endif
+
 static void register_hooks(apr_pool_t *pool)
 {
     (void) pool;
 
+    #if 0
+    ap_hook_post_config(bouncer_post_config, NULL, NULL, APR_HOOK_MIDDLE);
+    #endif
     ap_hook_handler(bouncer_handler, NULL, NULL, APR_HOOK_FIRST);
 }
 
 static bool is_trusted_proxy( const config_t *config, const apr_sockaddr_t *addr )
 {
-    if (config->proxies == NULL) return false;
+    if (config->proxies == NULL)
+        return false;
     const proxy_entry_t *items = (const proxy_entry_t *) config->proxies->elts;
     for (int i = 0; i < config->proxies->nelts; ++i)
         if (apr_ipsubnet_test((apr_ipsubnet_t*)items[i].addr, (apr_sockaddr_t*)addr)) return true;
@@ -267,9 +314,11 @@ static apr_sockaddr_t *get_client_xff_address( request_rec *r )
 static int bouncer_handler(request_rec *r)
 {
     config_t *config = (config_t*) get_server_config(r);
-    if (config == NULL) return DECLINED;
 
-    if (config->enabled == ENABLED_ON && tree_match(config->tree, r->unparsed_uri))
+    if (config == NULL /*|| config->enabled != ENABLED_ON*/)
+        return DECLINED;
+
+    if (tree_match(config->tree, r->unparsed_uri))
     {
         // try to retrieve the actual client address from XFF
         char *xff_str = NULL;

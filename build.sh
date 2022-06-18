@@ -10,4 +10,5 @@ apxs \
 -Wc,-Werror=implicit-function-declaration \
 -Wl,-fvisibility=hidden \
 -Wl,--no-undefined \
+-Wc,-Wfatal-errors \
 -c $DIR/mod_bouncer.c -c $DIR/tree.c -c $DIR/log.c
