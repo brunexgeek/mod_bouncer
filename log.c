@@ -4,35 +4,81 @@
 #include <string.h>
 #include <syslog.h>
 
-FILE *log_open( const char *filename )
+#include <apr_proc_mutex.h>
+
+struct log
 {
-    return fopen(filename, "a");
+    FILE *fp;
+    apr_proc_mutex_t *mutex;
+};
+
+static const char *TYPE_NAMES[] =
+{
+	"INFO",
+	"WARN",
+	"ERROR",
+	"BLOCK",
+};
+
+log_t *log_open( const char *path, apr_pool_t *pool )
+{
+	if (pool == NULL || path == NULL)
+		return NULL;
+	log_t *log = (log_t*) apr_pcalloc(pool, sizeof(log_t));
+	if (log == NULL)
+		return NULL;
+	if (apr_proc_mutex_create(&log->mutex, NULL, APR_LOCK_PROC_PTHREAD, pool) != APR_SUCCESS)
+		return NULL;
+    if ((log->fp = fopen(path, "a")) == NULL)
+	{
+		apr_proc_mutex_destroy(log->mutex);
+		return NULL;
+	}
+	return log;
 }
 
-void log_close( FILE *output )
+
+void log_close( log_t *log )
 {
-    fclose(output);
+	if (log == NULL)
+		return;
+    if (log->fp)
+	{
+		fclose(log->fp);
+		log->fp = NULL;
+	}
+    if (log->mutex)
+	{
+		apr_proc_mutex_destroy(log->mutex);
+		log->mutex = NULL;
+	}
 }
 
-void log_print( FILE *output, const char *format, ... )
+void log_print( log_t *log, log_type_t type, const char *format, ... )
 {
     va_list args;
 	time_t rawtime;
 	struct tm timeinfo;
 	char timeStr[28];
 
-    if (output == NULL) return;
+    if (log == NULL || log->fp == NULL || log->mutex == NULL)
+		return;
+
+	if (apr_proc_mutex_lock(log->mutex) != APR_SUCCESS)
+		return;
 
 	time(&rawtime);
 	localtime_r(&rawtime, &timeinfo);
 	strftime(timeStr, sizeof(timeStr) - 1, "%Y-%m-%dT%H:%M:%S%z", &timeinfo);
-	fprintf(output, "%s ", timeStr);
+	fprintf(log->fp, "%s [%s] ", timeStr, TYPE_NAMES[type]);
 
 	va_start(args, format);
-	vfprintf(output, format, args);
+	vfprintf(log->fp, format, args);
 	va_end(args);
-	fprintf(output, "\n");
-	fflush(output);
+	fprintf(log->fp, "\n");
+	fflush(log->fp);
+
+	apr_proc_mutex_unlock(log->mutex);
 }
 
 void syslog_print( const char *server, const char *format, ... )

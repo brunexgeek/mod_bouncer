@@ -28,9 +28,9 @@ typedef struct
 {
     apr_pool_t *pool;
     tree_t *tree;
-    FILE *log;
     apr_array_header_t *proxies;
     const char *server;
+    log_t *log;
     uint8_t enabled;
 } config_t;
 
@@ -149,8 +149,7 @@ static const char *directive_set_log(cmd_parms *cmd, void *cfg, const char *arg)
     config_t *config = (config_t*) get_server_config(cmd);
     if (config == NULL || config->enabled != ENABLED_ON || config->log != NULL)
         return NULL;
-    config->log = log_open(arg);
-    if (config->log == NULL)
+    if ((config->log = log_open(arg, config->pool)) == NULL)
         return apr_psprintf(cmd->pool, "Unable to open log %s: %s", arg, strerror(errno) );
     return NULL;
 }
@@ -283,7 +282,7 @@ static int bouncer_handler(request_rec *r)
         const char *rhost = r->connection->client_ip;
 
         r->status = HTTP_NOT_FOUND;
-        log_print(config->log, "[BLOCKED] %s %s %s \"%s\" %d \"%s\" \"%s\"",
+        log_print(config->log, LOG_TYPE_BLOCK, "%s %s %s \"%s\" %d \"%s\" \"%s\"",
             rhost,
             xff_str ? xff_str : rhost,
             r->method,
