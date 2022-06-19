@@ -181,11 +181,13 @@ static uint32_t pattern_get_methods( const char *value, size_t len )
             uint32_t f = pattern_get_method(method, len);
             if (f == 0)
                 return 0;
-            else
-                flags |= f;
+            flags |= f;
             if (len == 0) return flags;
             m = method;
         }
+        else
+        if (m >= method + sizeof(method))
+            return 0;
         else
             *m++ = *value;
         ++value;
