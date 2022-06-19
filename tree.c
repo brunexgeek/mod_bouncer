@@ -224,8 +224,10 @@ bool tree_append( tree_t *tree, const char *value )
         }
         else
         {
-            if (!tree_append_expr(tree, value, (size_t) (p - value), flags))
-                return false;
+            size_t len = (size_t) (p - value);
+            if (len >= 3 && len <= 255)
+                if (!tree_append_expr(tree, value, (size_t) (p - value), flags))
+                    return false;
         }
         value = p;
         while (*value == ' ' || *value == '\t') ++value;
