@@ -106,13 +106,24 @@ static char *add_pattern( config_t *config, apr_pool_t *pool, const char *patter
 {
     if (pattern == NULL || *pattern == 0)
         return "Pattern cannot be empty or NULL";
-    size_t len = strlen(pattern);
-    if (*pattern == '^') --len;
-    if (len < 3 || len > 255)
-        return "Pattern length must be 3 to 255 characters long";
     if (!tree_append(config->tree, pattern))
         return apr_psprintf(pool, "Unable to add patter '%s'", pattern);
     return NULL;
+}
+
+static char *string_trim( char *value )
+{
+    #define ISWP(c) ((c) == ' ' || (c) == '\t' || (c) == '\r' || (c) == '\n')
+    // spaces before
+    while (ISWP(*value)) ++value;
+    if (*value == 0) return value;
+    // spaces after
+    char *end = value;
+    while (*end != 0) ++end;
+    while (end > value && (ISWP(*end) || *end == 0))
+        *end-- = 0;
+    return value;
+    #undef ISWP
 }
 
 static const char *directive_set_pattern_file(cmd_parms *cmd, void *cfg, const char *arg)
@@ -122,14 +133,17 @@ static const char *directive_set_pattern_file(cmd_parms *cmd, void *cfg, const c
     if (config == NULL || config->enabled != ENABLED_ON)
         return NULL;
 
-    char pattern[1024];
+    static const size_t BUFFER_LEN = 8 * 1024;
+    char *buffer = apr_palloc(cmd->temp_pool, BUFFER_LEN);
+    if (buffer == NULL)
+        return "Unable to allocate memory";
     apr_file_t *fp = NULL;
     apr_file_open(&fp, arg, APR_FOPEN_READ, 0, cmd->pool);
     if (fp)
     {
-        while (apr_file_gets(pattern, sizeof(pattern)-1, fp) == APR_SUCCESS)
+        while (apr_file_gets(buffer, BUFFER_LEN-1, fp) == APR_SUCCESS)
         {
-            apr_collapse_spaces(pattern, pattern);
+            const char *pattern = string_trim(buffer);
             if (*pattern == 0) continue;
             const char *result = add_pattern(config, cmd->pool, pattern);
             if (result)
@@ -137,7 +151,7 @@ static const char *directive_set_pattern_file(cmd_parms *cmd, void *cfg, const c
                 apr_file_close(fp);
                 return result;
             }
-            //syslog_print(config->server, "Got pattern '%s'", pattern);
+
         }
         apr_file_close(fp);
         return NULL;
@@ -293,7 +307,7 @@ static apr_sockaddr_t *get_client_xff_address( request_rec *r )
             entry = dlist;
             dlist = NULL;
         }
-        apr_collapse_spaces(entry, entry);
+        entry = string_trim(entry);
 
         int type = look_like_address(entry);
         //syslog_print(config->server, "Processing remote %s [IPv%d]", entry, type);
