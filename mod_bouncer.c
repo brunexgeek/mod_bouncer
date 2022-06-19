@@ -328,8 +328,7 @@ static apr_sockaddr_t *get_client_xff_address( request_rec *r )
 static int bouncer_handler(request_rec *r)
 {
     config_t *config = (config_t*) get_server_config(r);
-
-    if (config == NULL /*|| config->enabled != ENABLED_ON*/)
+    if (config == NULL || config->enabled != ENABLED_ON)
         return DECLINED;
 
     if (tree_match(config->tree, r->unparsed_uri, r->method))
