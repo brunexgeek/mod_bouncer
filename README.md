@@ -18,11 +18,22 @@ You need to restart the Apache service after the installation.
 ## Configuration
 
 `mod_bouncer` offers the following directives to be used in the server configuration.
-* **BouncerEngine**: Enable (`on`) or disable (`off`) the `mod_bouncer`. This directive must appear before any other.
+* **BouncerEngine**: Enable (`on`) or disable (`off`) the `mod_bouncer`. This directive should appear before any other. By default the `mod_bouncer` is disabled.
 * **BouncerPattern**: Add one or more patterns. Patterns are separated by spaces and must be 3 to 255 characters long. Valid characters are (see section [2. Characters](https://www.rfc-editor.org/rfc/rfc3986#section-2) of [RFC 3986](https://www.rfc-editor.org/rfc/rfc3986)): `A-Z`, `a-z`, `0-9`, `-`, `.`, `_`, `~`, `:`, `/`, `?`, `#`, `[`, `]`, `@`, `!`, `$`, `&`, `'`, `(`, `)`, `*`, `+`, `,`, `;`, `%`, and `=`. You can also use `^` as the first character to indicate the pattern must appear at the beginning of the URL path. This directive can be used multiple times.
-* **BouncerPatternFile**: Add patterns via external text file. Each line of the file must contain only one pattern. This directive can be used multiple times.
-* **BouncerTrustedProxy**: List of IP addresses of the trusted proxies. This is used to discover the actual address of the client when the Apache is behind one or more proxies. This directive can be used multiple times. For more information, see [X-Forwarded-For](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Forwarded-For) at MDN. The discovered address is used in the module log.
+* **BouncerPatternFile**: Add patterns via external text file. Each line of the file is equivalent to a `BouncerPattern` directive. This directive can be used multiple times.
+* **BouncerTrustedProxy**: List of trusted proxies IP addresses. This list is used to find out the internet address of the client when Apache is behind one or more internal proxies. For more accurate results, each internal proxy in the chain should appear here. This directive can be used multiple times. For more information, see [X-Forwarded-For](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/X-Forwarded-For) at MDN. The address discovered is shown in the log along with the current client address (probably from an internal proxy).
 * **BouncerLog**: Path to the log file. Make sure the Apache process has the necessary privilege to write to the file. This log contains entries for every blocked request and can be monitored by tools (e.g. `fail2ban`) to change firewall rules or generate alerts.
+
+## Pattern file
+The pattern file, used by the `BouncerPatternFile` directive, specifies a set of patterns. This file is especially useful for sharing patterns between virtual hosts. Each line in the file is equivalent to a `BouncerPattern` directive.
+
+The first argument of each pattern is a set of HTTP methods to which the pattern will be applied. More than one method can be specified, separating them with vertical bars (|). Possible values are one or more of: `GET`, `POST`, `PUT`, `DELETE`, `CONNECT`, `OPTIONS`, `TRACE` and `PATCH`. The special value `ANY` can be used to match all HTTP methods.
+
+```
+GET|POST /xmlrpc cgi-bin
+POST /changeUser /delete_file
+ANY virus
+```
 
 ## Example
 
@@ -33,10 +44,11 @@ Example of server at `10.0.1.25` that receives requests through a proxy at `10.0
     ...
     <IfModule mod_bouncer.c>
             BouncerEngine on
-            BouncerPattern .git ^/wp-admin
+            BouncerPattern GET|POST .git ^/wp-admin
             BouncerPattern ^/xmlrpc
             BouncerLog /run/mod_bouncer.log
             BouncerTrustedProxy 10.0.1.24
+            BouncerPatternFile mod_bouncer.txt
     </IfModule>
     ...
 </VirtualHost>
