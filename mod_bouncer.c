@@ -332,7 +332,7 @@ static int bouncer_handler(request_rec *r)
     if (config == NULL /*|| config->enabled != ENABLED_ON*/)
         return DECLINED;
 
-    if (tree_match(config->tree, r->unparsed_uri))
+    if (tree_match(config->tree, r->unparsed_uri, r->method))
     {
         // try to retrieve the actual client address from XFF
         char *xff_str = NULL;
