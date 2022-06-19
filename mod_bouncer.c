@@ -331,7 +331,20 @@ static int bouncer_handler(request_rec *r)
     if (config == NULL || config->enabled != ENABLED_ON)
         return DECLINED;
 
-    if (tree_match(config->tree, r->unparsed_uri, r->method))
+    // try to get the original URI (e.g. not modified by mod_write)
+    const char *uri = strchr(r->the_request, ' ');
+    if (uri != NULL)
+    {
+        uri++;
+        const char *end = strchr(uri, ' ');
+        if (end != NULL)
+            uri = apr_pstrndup(r->pool, uri, (size_t) (end - uri));
+    }
+    // fallback to the unparsed URI
+    if (uri == NULL)
+        uri = r->unparsed_uri;
+
+    if (tree_match(config->tree, uri, r->method))
     {
         // try to retrieve the actual client address from XFF
         char *xff_str = NULL;
