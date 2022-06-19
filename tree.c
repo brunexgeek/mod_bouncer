@@ -23,6 +23,7 @@
 #define FLAG_END      0x40000000U
 #define FLAG_TERMINAL 0x80000000U
 #define OFFSET_MASK   0x000FFFFFU
+#define METHODS_MASK  FLAG_ANY
 
 // index to offset
 #define I2O(index) (((index) & OFFSET_MASK) * ALPHABET_SIZE)
@@ -235,9 +236,13 @@ bool tree_append( tree_t *tree, const char *value )
     return true;
 }
 
-bool tree_match( const tree_t *root, const char *value )
+bool tree_match( const tree_t *root, const char *value, const char *method )
 {
     if (root == NULL || value == NULL || *value == 0)
+        return false;
+
+    uint32_t fmethod = pattern_get_method(method, strlen(method));
+    if (fmethod == 0)
         return false;
 
     const char *tmp = value;
@@ -254,12 +259,12 @@ bool tree_match( const tree_t *root, const char *value )
             id = ascii_to_index(*p++);
             if (id < 0)
                 break;
-            uint32_t idx = off + (uint32_t) id;
-            if (root->slots[idx] & FLAG_TERMINAL)
-                return (root->slots[idx] & FLAG_BEGIN) == 0 || tmp == value;
-            if ((root->slots[idx] & OFFSET_MASK) == 0)
+            uint32_t slot = root->slots[off + (uint32_t) id];
+            if (slot & FLAG_TERMINAL && (slot & fmethod))
+                return (slot & FLAG_BEGIN) == 0 || tmp == value;
+            if ((slot & OFFSET_MASK) == 0)
                 break;
-            off = I2O(root->slots[idx]);
+            off = I2O(slot);
         }
         ++tmp;
         --len;
