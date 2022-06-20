@@ -8,7 +8,7 @@
 #include "apr_allocator.h"
 #include "apr_strings.h"
 
-#include "tree.h"
+#include "dfa.h"
 #include "log.h"
 
 #include <stdbool.h>
@@ -29,7 +29,7 @@ typedef struct
     apr_pool_t *pool;
     apr_array_header_t *proxies;
     log_t *log;
-    tree_t *tree;
+    dfa_t *dfa;
     uint8_t enabled;
     uint32_t blocked_methods;
 } config_t;
@@ -73,7 +73,7 @@ static void *create_server_conf(apr_pool_t *pool, server_rec *s)
     {
         config->pool = pool;
         config->enabled = ENABLED_UNDEF;
-        config->tree = tree_create();
+        config->dfa = dfa_create();
     }
     return config;
 }
@@ -92,10 +92,10 @@ static const char *directive_set_enabled(cmd_parms *cmd, void *cfg, const char *
         config->enabled = ENABLED_OFF;
         if (config->proxies) apr_array_clear(config->proxies);
         if (config->log) log_close(config->log);
-        if (config->tree) tree_destroy(config->tree);
+        if (config->dfa) dfa_destroy(config->dfa);
         config->proxies = NULL;
         config->log = NULL;
-        config->tree = NULL;
+        config->dfa = NULL;
     }
     else
         return "Invalid argument. Possible values are 'on' and 'off'";
@@ -108,10 +108,10 @@ static char *add_pattern( config_t *config, apr_pool_t *pool, const char *patter
         return "Pattern cannot be empty or NULL";
     // method only
     if (!strchr(pattern, ' '))
-        config->blocked_methods |= pattern_get_method(pattern, strlen(pattern));
+        config->blocked_methods |= dfa_extract_methods(pattern, strlen(pattern));
     else
     // method and expression
-    if (!tree_append(config->tree, pattern))
+    if (!dfa_append(config->dfa, pattern))
         return apr_psprintf(pool, "Unable to add patter '%s'", pattern);
     return NULL;
 }
@@ -256,10 +256,10 @@ static int bouncer_post_config(apr_pool_t *pconf, apr_pool_t *plog,apr_pool_t *p
         config_t *config = (config_t*) ap_get_module_config(server->module_config, &bouncer_module);
         if (config == NULL) return DECLINED;
 
-        if (config->tree)
+        if (config->dfa)
         {
             uint32_t size;
-            tree_usage(config->tree, &size, NULL);
+            dfa_usage(config->dfa, &size, NULL);
             log_print(config->log, LOG_TYPE_INFO, "Configuration done. Memory usage is %0.2f KiB.",
                 (float) size / 1024.0F);
         }
@@ -363,7 +363,7 @@ static int bouncer_handler(request_rec *r)
     // try to block by HTTP method
     if (config->blocked_methods != 0)
     {
-        uint32_t method = pattern_get_method(r->method, strlen(r->method));
+        uint32_t method = dfa_detect_method(r->method, strlen(r->method));
         if (config->blocked_methods & method)
             return block_request(config, r );
     }
@@ -382,7 +382,7 @@ static int bouncer_handler(request_rec *r)
         if (uri == NULL)
             uri = r->unparsed_uri;
         // try to block by pattern matching
-        if (tree_match(config->tree, uri, r->method))
+        if (dfa_match(config->dfa, uri, r->method))
             return block_request(config, r );
     }
 
