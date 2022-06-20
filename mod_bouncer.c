@@ -30,8 +30,8 @@ typedef struct
     apr_array_header_t *proxies;
     log_t *log;
     tree_t *tree;
-    uint32_t enabled : 2;
-    uint32_t flags : 30;
+    uint8_t enabled;
+    uint32_t blocked_methods;
 } config_t;
 
 static void *create_server_conf(apr_pool_t *pool, server_rec *s);
@@ -106,6 +106,11 @@ static char *add_pattern( config_t *config, apr_pool_t *pool, const char *patter
 {
     if (pattern == NULL || *pattern == 0)
         return "Pattern cannot be empty or NULL";
+    // method only
+    if (!strchr(pattern, ' '))
+        config->blocked_methods |= pattern_get_method(pattern, strlen(pattern));
+    else
+    // method and expression
     if (!tree_append(config->tree, pattern))
         return apr_psprintf(pool, "Unable to add patter '%s'", pattern);
     return NULL;
@@ -325,47 +330,60 @@ static apr_sockaddr_t *get_client_xff_address( request_rec *r )
     return NULL;
 }
 
+static int block_request( config_t *config, request_rec *r )
+{
+    // try to retrieve the actual client address from XFF
+    char *xff_str = NULL;
+    apr_sockaddr_t *xff = get_client_xff_address(r);
+    if (xff != NULL)
+        apr_sockaddr_ip_get(&xff_str, xff);
+
+    const char *ua = apr_table_get(r->headers_in, "User-Agent");
+    const char *ref = apr_table_get(r->headers_in, "Referer");
+    const char *rhost = r->connection->client_ip;
+
+    r->status = HTTP_NOT_FOUND;
+    log_print(config->log, LOG_TYPE_BLOCK, "%s %s %s \"%s\" %d \"%s\" \"%s\"",
+        rhost,
+        xff_str ? xff_str : rhost,
+        r->method,
+        r->unparsed_uri,
+        r->status,
+        ref ? ref : "",
+        ua ? ua : "");
+    return DONE;
+}
+
 static int bouncer_handler(request_rec *r)
 {
     config_t *config = (config_t*) get_server_config(r);
     if (config == NULL || config->enabled != ENABLED_ON)
         return DECLINED;
 
-    // try to get the original URI (e.g. not modified by mod_write)
-    const char *uri = strchr(r->the_request, ' ');
-    if (uri != NULL)
+    // try to block by HTTP method
+    if (config->blocked_methods != 0)
     {
-        uri++;
-        const char *end = strchr(uri, ' ');
-        if (end != NULL)
-            uri = apr_pstrndup(r->pool, uri, (size_t) (end - uri));
+        uint32_t method = pattern_get_method(r->method, strlen(r->method));
+        if (config->blocked_methods & method)
+            return block_request(config, r );
     }
-    // fallback to the unparsed URI
-    if (uri == NULL)
-        uri = r->unparsed_uri;
-
-    if (tree_match(config->tree, uri, r->method))
+    else
     {
-        // try to retrieve the actual client address from XFF
-        char *xff_str = NULL;
-        apr_sockaddr_t *xff = get_client_xff_address(r);
-        if (xff != NULL)
-            apr_sockaddr_ip_get(&xff_str, xff);
-
-        const char *ua = apr_table_get(r->headers_in, "User-Agent");
-        const char *ref = apr_table_get(r->headers_in, "Referer");
-        const char *rhost = r->connection->client_ip;
-
-        r->status = HTTP_NOT_FOUND;
-        log_print(config->log, LOG_TYPE_BLOCK, "%s %s %s \"%s\" %d \"%s\" \"%s\"",
-            rhost,
-            xff_str ? xff_str : rhost,
-            r->method,
-            r->unparsed_uri,
-            r->status,
-            ref ? ref : "",
-            ua ? ua : "");
-        return DONE;
+        // try to get the original URI (e.g. not modified by mod_write)
+        const char *uri = strchr(r->the_request, ' ');
+        if (uri != NULL)
+        {
+            uri++;
+            const char *end = strchr(uri, ' ');
+            if (end != NULL)
+                uri = apr_pstrndup(r->pool, uri, (size_t) (end - uri));
+        }
+        // fallback to unparsed URI
+        if (uri == NULL)
+            uri = r->unparsed_uri;
+        // try to block by pattern matching
+        if (tree_match(config->tree, uri, r->method))
+            return block_request(config, r );
     }
 
     return DECLINED;

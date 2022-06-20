@@ -136,7 +136,7 @@ static bool tree_append_expr( tree_t *tree, const char *expr, size_t len, uint32
     return true;
 }
 
-inline static uint32_t pattern_get_method( const char *value, size_t len )
+uint32_t pattern_get_method( const char *value, size_t len )
 {
     if (*value == 'A' && !strncmp(value, "ANY", len))
         return FLAG_ANY;
