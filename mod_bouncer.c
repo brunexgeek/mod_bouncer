@@ -56,13 +56,15 @@ static const command_rec bouncer_directives[] =
 module AP_MODULE_DECLARE_DATA bouncer_module =
 {
     STANDARD20_MODULE_STUFF,
-    NULL,                          // Per-directory configuration handler
-    NULL,                          // Merge handler for per-directory configurations
-    create_server_conf,            // Per-server configuration handler
-    NULL,                          // Merge handler for per-server configurations
-    bouncer_directives,            // Any directives we may have for httpd
-    register_hooks,                // Our hook registering function
-    AP_MODULE_FLAG_NONE
+    NULL,
+    NULL,
+    create_server_conf,
+    NULL,
+    bouncer_directives,
+    register_hooks
+#if defined(AP_MODULE_FLAG_NONE)
+    , AP_MODULE_FLAG_NONE
+#endif
 };
 
 static void *create_server_conf(apr_pool_t *pool, server_rec *s)
