@@ -227,13 +227,9 @@ bool dfa_append( dfa_t *dfa, const char *value )
     return true;
 }
 
-bool dfa_match( const dfa_t *root, const char *value, const char *method )
+bool dfa_match( const dfa_t *root, const char *value, uint32_t method )
 {
     if (root == NULL || value == NULL || *value == 0)
-        return false;
-
-    uint32_t fmethod = dfa_detect_method(method, strlen(method));
-    if (fmethod == 0)
         return false;
 
     const char *tmp = value;
@@ -251,7 +247,7 @@ bool dfa_match( const dfa_t *root, const char *value, const char *method )
             if (id < 0)
                 break;
             uint32_t slot = root->slots[off + (uint32_t) id];
-            if (slot & DFA_FLAG_TERMINAL && (slot & fmethod))
+            if (slot & DFA_FLAG_TERMINAL && (slot & method))
                 return (slot & DFA_FLAG_BEGIN) == 0 || tmp == value;
             if ((slot & OFFSET_MASK) == 0)
                 break;
