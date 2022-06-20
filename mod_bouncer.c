@@ -344,7 +344,7 @@ static int block_request( config_t *config, request_rec *r )
     const char *ref = apr_table_get(r->headers_in, "Referer");
     const char *rhost = r->connection->client_ip;
 
-    r->status = HTTP_NOT_FOUND;
+    r->status = HTTP_UNAUTHORIZED;
     log_print(config->log, LOG_TYPE_BLOCK, "%s %s %s \"%s\" %d \"%s\" \"%s\"",
         rhost,
         xff_str ? xff_str : rhost,
@@ -363,11 +363,11 @@ static int bouncer_handler(request_rec *r)
         return DECLINED;
 
     // try to block by HTTP method
+    uint32_t method = dfa_detect_method(r->method, strlen(r->method));
     if (config->blocked_methods != 0)
     {
-        uint32_t method = dfa_detect_method(r->method, strlen(r->method));
         if (config->blocked_methods & method)
-            return block_request(config, r );
+            return block_request(config, r);
     }
     else
     {
@@ -384,8 +384,8 @@ static int bouncer_handler(request_rec *r)
         if (uri == NULL)
             uri = r->unparsed_uri;
         // try to block by pattern matching
-        if (dfa_match(config->dfa, uri, r->method))
-            return block_request(config, r );
+        if (dfa_match(config->dfa, uri, method))
+            return block_request(config, r);
     }
 
     return DECLINED;

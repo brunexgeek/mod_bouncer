@@ -36,7 +36,7 @@ dfa_t *dfa_create();
 void dfa_destroy( dfa_t *dfa );
 void dfa_usage( dfa_t *dfa, uint32_t *total, uint32_t *waste );
 bool dfa_append( dfa_t *dfa, const char *expr );
-bool dfa_match( const dfa_t *dfa, const char *value, const char *method );
+bool dfa_match( const dfa_t *dfa, const char *value, uint32_t method );
 uint32_t dfa_detect_method( const char *value, size_t len ); // handle a single HTTP method
 uint32_t dfa_extract_methods( const char *value, size_t len ); // handle multiple HTTP methods (using |)
 
