@@ -11,4 +11,10 @@ apxs \
 -Wl,-fvisibility=hidden \
 -Wl,--no-undefined \
 -Wc,-Wfatal-errors \
--c $DIR/mod_bouncer.c -c $DIR/dfa.c -c $DIR/log.c
+-Wc,-Werror=incompatible-pointer-types \
+-Wc,-g \
+-Wc,-std=c11 \
+-c $DIR/mod_bouncer.c \
+-c $DIR/dfa.c \
+-c $DIR/log.c \
+-c $DIR/table.c
